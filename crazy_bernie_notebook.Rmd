@@ -1,0 +1,169 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r}
+library(tidyverse) # for the basics
+library(rtweet) # for tweets
+library(lubridate) # for date manipulation
+library(tidytext) # for tokenizing
+library(gganimate) # for gifs
+library(rvest) # for scraping html
+library(png) # for image manipulation
+library(grid) # for custom plot manipulation
+library(extrafont) # for nice fonts
+library(ggtext) # for adding colour in plot titles
+```
+
+# Get Tweets
+
+```{r}
+tweet_keywords <- "\"crazy bernie\""
+
+# create a folder for the datasets
+if(dir.exists(here::here("/tweets")) == FALSE) {
+  dir.create(here::here("/tweets"))
+}
+since <- as.Date("2020-02-16")
+
+# save tweets locally
+crazy_bernie_tweets <- search_tweets(tweet_keywords,
+                                     since = since,
+                                     until = Sys.Date() + 1,
+                                     include_rts = FALSE,
+                                     retryonratelimit = TRUE,
+                                     type = "recent") %>%
+  mutate_if(is.list, as.character) 
+
+# write_csv(crazy_bernie_tweets, "crazy_bernie_tweets.csv")
+```
+
+```{r}
+DT_timeline <- get_timeline("@realDonaldTrump", n = 300) %>%
+  mutate_if(is.list, as.character) %>%
+  mutate(created_at = with_tz(ymd_hms(created_at), tzone = "America/New_York"))
+
+DT_crazy_bernie_tweets <- DT_timeline %>%
+  filter(str_detect(text, "Crazy Bernie")) %>%
+  arrange(desc(created_at)) %>%
+  head(2)
+```
+
+# Hourly Volume
+
+```{r}
+crazy_bernie_tweets_unique <- crazy_bernie_tweets %>%
+  group_by(screen_name, text) %>% 
+  mutate(tweet_entries = row_number()) %>% # count tweets and remove extra entries
+  filter(tweet_entries == 1) %>%
+  ungroup()
+```
+
+```{r}
+# group into ten-minute intervals
+crazy_bernie_tweets_intervals <- crazy_bernie_tweets_unique %>%
+  mutate(created_at = ymd_hms(created_at),
+         interval = with_tz(round_date(created_at, "1 hour"), 
+                            tzone = "America/New_York"))
+```
+
+```{r}
+# calculate volume
+crazy_bernie_tweet_volume <- crazy_bernie_tweets_intervals %>% 
+  group_by(interval) %>%
+  summarize(tweet_volume = n()) %>%
+  ungroup()
+```
+
+```{r fig.width = 10, fig.height= 5}
+p <- crazy_bernie_tweets_unique %>%
+  select(created_at, text) %>%
+  arrange(created_at) %>%
+  mutate(order = 1,
+         volume = cumsum(order)) %>%
+  ggplot(aes(x=created_at, y=volume)) +
+  geom_path() +
+  # geom_vline(xintercept = DT_crazy_bernie_tweets$created_at) +
+  labs(title = 'One Week Momentum for "Crazy Bernie"') +
+  annotation_custom(tweet_pic, 
+                    ymin= 6000, 
+                    ymax= 3000,
+                    xmin = as.POSIXct("2020-02-13")) +
+  geom_curve(aes(x = as.POSIXct("2020-02-21"), 
+                 y = 5000, 
+                 xend = as.POSIXct("2020-02-22 18:55:36"), 
+                 yend = 4000), 
+             colour = 'black', 
+             size = 0.5, 
+             curvature = -0.2,
+             arrow = arrow(length = unit(0.2, "cm")))  +
+  theme_light() +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank())
+
+anim <- p +
+  transition_reveal(created_at, 
+                    range = c(as.POSIXct("2020-02-21"),
+                              as.POSIXct("2020-02-24"))) 
+
+animate(anim, fps = 20, duration = 10, height = 512, width = 1024)
+``` 
+
+```{r}
+# leafs logo
+l <- readPNG(str_glue("~/Downloads/trump_crazy_bernie_tweet.png"))
+
+# make transparent
+tweet_pic <- rasterGrob(l, interpolate=TRUE)
+```
+
+```{r  out.width = "1024px", out.height= "512px"}
+p <- crazy_bernie_tweet_volume  %>%
+  ggplot(aes(x = interval, y = tweet_volume, group = 1)) +
+  geom_path() +
+  geom_vline(xintercept = DT_crazy_bernie_tweets$created_at) +
+  labs(title = 'Hourly Volume of "Crazy Bernie"', 
+       x= "") +
+  annotation_custom(tweet_pic,
+                    ymin= 225,
+                    ymax= 125,
+                    xmin = as.POSIXct("2020-02-14")) +
+  geom_curve(aes(x = as.POSIXct("2020-02-21"),
+                 y = 100,
+                 xend = as.POSIXct("2020-02-22 17:55:36"),
+                 yend = 100,
+                 group = 2),
+             colour = 'black',
+             size = 0.5,
+             curvature = -0.1,
+             arrow = arrow(length = unit(0.2, "cm")))
+
+anim <- p +
+  transition_reveal(interval, range = c(as.POSIXct("2020-02-22"),
+                                        as.POSIXct("2020-02-24"))) +
+  view_follow() 
+
+animate(anim, fps = 20, duration = 10, height = 512, width = 1024)
+```
+
+```{r}
+top10_crazy_bernie <- crazy_bernie_tweets_unique %>%
+  arrange(desc(favorite_count)) %>%
+  head(10)
+
+crazy_bernie_tweet_volume  %>%
+  ggplot(aes(x = interval, y = tweet_volume)) +
+  geom_line() +
+  geom_vline(xintercept = top10_crazy_bernie$created_at) +
+  labs(title = 'Hourly Volume of "Crazy Bernie"',
+       x= "")
+```
+
+# show total accumulation + daily use
+
+```{r}
+# bar chart for daily and line chart for overall
+```
+
+
